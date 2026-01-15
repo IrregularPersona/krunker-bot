@@ -180,6 +180,61 @@ impl EventHandler for Handler {
                 }
             }
 
+            "listmatches" => {
+                let username = parts.next().unwrap_or("");
+                if username.is_empty() {
+                    if let Err(why) = msg
+                        .channel_id
+                        .say(&ctx.http, "Usage: &listmatches <username>")
+                        .await
+                    {
+                        tracing::error!("Error sending message: {why:?}");
+                    }
+                    return;
+                }
+
+                match self
+                    .krunker_api
+                    .get_player_matches(username, None, None)
+                    .await
+                {
+                    Ok(data) => {
+                        if data.pmr_matches.is_empty() {
+                            if let Err(why) = msg
+                                .channel_id
+                                .say(&ctx.http, "No recent matches found!")
+                                .await
+                            {
+                                tracing::error!("Error sending message: {why:?}");
+                            }
+                            return;
+                        }
+
+                        let match_ids: Vec<String> = data
+                            .pmr_matches
+                            .iter()
+                            .map(|m| m.pm_match_id.to_string())
+                            .collect();
+
+                        let response = format!(
+                            "**Recent Match IDs for {}:**\n{}",
+                            username,
+                            match_ids.join("\n")
+                        );
+
+                        if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
+                            tracing::error!("Error sending message: {why:?}");
+                        }
+                    }
+                    Err(e) => {
+                        let response = format!("Error fetching matches: {}", e);
+                        if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
+                            tracing::error!("Error sending message: {why:?}");
+                        }
+                    }
+                }
+            }
+
             _ => {
                 if let Err(why) = msg.channel_id.say(&ctx.http, "Not a valid command").await {
                     eprintln!("Error sending message: {why:?}");
@@ -193,7 +248,7 @@ impl EventHandler for Handler {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // env vars
     let krunker_key = std::env::var("KRUNKER_KEY")?;
-    let discord_token = std::env::var("DISCORD_TOKEN2")?;
+    let discord_token = std::env::var("DISCORD_TOKEN")?;
 
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)

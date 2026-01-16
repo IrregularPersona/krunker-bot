@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use chrono::TimeDelta;
-use serenity::all::{CreateEmbed, CreateMessage, ErrorResponse};
+use serenity::all::{CreateAttachment, CreateEmbed, CreateMessage};
 use serenity::model::channel::Message;
 use serenity::prelude::*;
 
 use krunker_rs::Client as KrunkerClient;
-use krunker_rs::MatchParticipant;
 use std::sync::Arc;
+
+use crate::pngrender::{get_png, StatInputs};
 
 #[async_trait]
 pub trait KrunkerCommand {
@@ -64,30 +64,28 @@ impl KrunkerCommand for Stats {
 
         match krunker_api.get_player(username).await {
             Ok(player) => {
-                let embed = CreateEmbed::new()
-                    .title(format!(
-                        "{}{}",
-                        player.player_name,
-                        if player.player_verified { " ✅" } else { "" }
-                    ))
-                    .field(
-                        "Clan",
-                        if player.player_clan.is_empty() {
-                            "None"
-                        } else {
-                            &player.player_clan
-                        },
-                        true,
-                    )
-                    .field("Level", player.player_level.to_string(), true)
-                    .field("KR", player.player_kr.to_string(), true)
-                    .field("K/D Ratio", format!("{:.2}", player.player_kdr), true)
-                    .field("Games Played", player.player_games.to_string(), true)
-                    .color(0x00ff00);
+                // Generate PNG using the pngrender module
+                let png_data = match get_png(StatInputs::Profile(player.clone())) {
+                    Some(data) => data,
+                    None => {
+                        if let Err(_) = msg
+                            .channel_id
+                            .say(&ctx.http, "Failed to generate player stats image")
+                            .await
+                        {
+                            tracing::error!("Failed to generate PNG for player {}", username);
+                        }
+                        return;
+                    }
+                };
 
+                // Create attachment from PNG data
+                let attachment = CreateAttachment::bytes(png_data, format!("{}_stats.png", player.player_name));
+
+                // Send the PNG as an attachment
                 if let Err(why) = msg
                     .channel_id
-                    .send_message(&ctx.http, CreateMessage::new().embed(embed))
+                    .send_message(&ctx.http, CreateMessage::new().add_file(attachment))
                     .await
                 {
                     tracing::error!("Error sending message: {why:?}");
@@ -318,88 +316,28 @@ impl KrunkerCommand for SpecificMatch {
                     }
                 };
 
-                let dur = TimeDelta::milliseconds(data.match_duration as i64);
-                let mins = dur.num_minutes();
-                let secs = dur.num_seconds() % 60;
-
-                let mut embed = CreateEmbed::new()
-                    .title(format!("Match Details - ID: {}", data.match_id))
-                    .field("Map", data.match_map.to_string(), true)
-                    .field("Duration", format!("{}m {}s", mins, secs), true)
-                    .field("Date", &data.match_date, true)
-                    .color(0x00ff00);
-
-                let mut team_1: Vec<&MatchParticipant> = Vec::new();
-                let mut team_2: Vec<&MatchParticipant> = Vec::new();
-
-                // some hacky shit. could prolly write it with some weird rust oneliner lmfao
-                for participant in participants {
-                    if participant.mp_team == 1 {
-                        team_1.push(participant);
-                    } else {
-                        team_2.push(participant);
+                // Generate PNG using the pngrender module
+                let png_data = match get_png(StatInputs::Match(participants.clone())) {
+                    Some(data) => data,
+                    None => {
+                        if let Err(_) = msg
+                            .channel_id
+                            .say(&ctx.http, "Failed to generate match image")
+                            .await
+                        {
+                            tracing::error!("Failed to generate PNG for match {}", match_id);
+                        }
+                        return;
                     }
-                }
-
-                let format_player = |p: &MatchParticipant| -> String {
-                    let kda = format!("{}/{}/{}", p.mp_kills, p.mp_deaths, p.mp_assists);
-                    let result = if p.mp_victory == 1 { "🏆" } else { "" };
-                    format!(
-                        "**{}** {}\nK/D/A: {} | Score: {}\nDamage: {} | Obj: {}",
-                        p.mp_player_name,
-                        result,
-                        kda,
-                        p.mp_score,
-                        p.mp_damage_done,
-                        p.mp_objective_score
-                    )
                 };
 
-                if !team_1.is_empty() {
-                    let team_1_stats = team_1
-                        .iter()
-                        .map(|p| format_player(p))
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
+                // Create attachment from PNG data
+                let attachment = CreateAttachment::bytes(png_data, format!("match_{}.png", data.match_id));
 
-                    embed = embed.field(
-                        format!(
-                            "Team 1 {}",
-                            if team_1[0].mp_victory == 1 {
-                                "🏆"
-                            } else {
-                                ""
-                            }
-                        ),
-                        team_1_stats,
-                        false,
-                    );
-                }
-
-                if !team_2.is_empty() {
-                    let team_2_stats = team_2
-                        .iter()
-                        .map(|p| format_player(p))
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-
-                    embed = embed.field(
-                        format!(
-                            "Team 2 {}",
-                            if team_2[0].mp_victory == 1 {
-                                "🏆"
-                            } else {
-                                ""
-                            }
-                        ),
-                        team_2_stats,
-                        false,
-                    );
-                }
-
+                // Send the PNG as an attachment
                 if let Err(why) = msg
                     .channel_id
-                    .send_message(&ctx.http, CreateMessage::new().embed(embed))
+                    .send_message(&ctx.http, CreateMessage::new().add_file(attachment))
                     .await
                 {
                     tracing::error!("Error sending message: {why:?}");

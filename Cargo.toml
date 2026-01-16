@@ -6,8 +6,11 @@ edition = "2024"
 [dependencies]
 serenity = "0.12.5"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
-krunker-rs = { git = "https://github.com/IrregularPersona/krunker-rs" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 async-trait = "0.1.89"
 chrono = "0.4.43"
+
+krunker-rs = { git = "https://github.com/IrregularPersona/krunker-rs" }
+typst_png = { git = "https://github.com/IrregularPersona/typst-png" }
+

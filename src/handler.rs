@@ -6,7 +6,6 @@ use std::sync::Arc;
 use krunker_rs::Client as KrunkerClient;
 
 // serenity
-use serenity::all::{CreateEmbed, CreateMessage};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;

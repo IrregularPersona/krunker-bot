@@ -2,10 +2,11 @@ use krunker_rs::Client as KrunkerClient;
 use serenity::prelude::*;
 use std::sync::Arc;
 
-mod handler;
-use handler::Handler;
-
 mod commands;
+mod handler;
+mod pngrender;
+
+use handler::Handler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

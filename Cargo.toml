@@ -20,6 +20,7 @@ tracing-subscriber = "0.3.22"
 # time helper
 chrono = "0.4.43"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
+rand = "0.9.2"
 
 # database
 

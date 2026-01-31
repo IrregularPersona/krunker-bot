@@ -12,6 +12,9 @@ use crate::bot::handler::Handler;
 // database submodule
 mod database;
 
+// verification submodule
+mod verification;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // initialize logging

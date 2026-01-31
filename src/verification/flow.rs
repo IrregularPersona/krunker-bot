@@ -1,5 +1,6 @@
 use crate::database::queries;
 use chrono::Utc;
+use krunker_rs::Client as KrunkerClient;
 use rand::distr::{Alphanumeric, SampleString};
 use sqlx::SqlitePool;
 
@@ -36,6 +37,7 @@ pub async fn start_verification(
 
 pub async fn check_verification(
     pool: &SqlitePool,
+    krunker_api: &KrunkerClient,
     discord_id: &str,
 ) -> Result<VerificationResult, Box<dyn std::error::Error>> {
     let expr = Utc::now().timestamp();
@@ -54,13 +56,26 @@ pub async fn check_verification(
         None => return Ok(VerificationResult::NoVerification),
     };
 
-    // TODO: Fetch Krunker social posts and check for code
-    // For now, we'll return a placeholder
-    // This is where you'll call the Krunker API:
-    // let posts = krunker_api::get_player_posts(&verification.krunker_username).await?;
-    // let found = posts.iter().any(|post| post.text.contains(&verification.code));
+    // Fetch Krunker social posts and check for code
+    let response = krunker_api
+        .get_player_posts(&verification.krunker_username, Some(1))
+        .await?;
 
-    // Placeholder - always return NotFound for now
+    // Check if any post contains the verification code
+    let found = if let Some(posts) = response.posts_posts {
+        posts
+            .iter()
+            .any(|post| post.post_text.contains(&verification.code))
+    } else {
+        false
+    };
+
+    if found {
+        return Ok(VerificationResult::Success {
+            krunker_username: verification.krunker_username,
+        });
+    }
+
     Ok(VerificationResult::NotFound {
         code: verification.code,
         krunker_username: verification.krunker_username,
@@ -99,4 +114,111 @@ pub enum VerificationResult {
     Success {
         krunker_username: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::SqlitePool;
+
+    async fn setup_test_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_start_verification_success() {
+        let pool = setup_test_db().await;
+        let discord_id = "12345";
+        let krunker_username = "Player1";
+
+        let result = start_verification(&pool, discord_id, krunker_username).await;
+        assert!(result.is_ok());
+
+        let code = result.unwrap();
+        assert!(code.starts_with("VERIFY-"));
+        assert_eq!(code.len(), 15); // "VERIFY-" (7) + 8 chars
+    }
+
+    #[tokio::test]
+    async fn test_start_verification_already_linked() {
+        let pool = setup_test_db().await;
+        let discord_id = "12345";
+
+        // Pre-create user
+        queries::create_user(&pool, "ExistingPlayer", discord_id, None)
+            .await
+            .unwrap();
+
+        let result = start_verification(&pool, discord_id, "NewPlayer").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already linked"));
+    }
+
+    #[tokio::test]
+    async fn test_complete_verification_already_exists() {
+        let pool = setup_test_db().await;
+        let discord_id = "12345";
+
+        // Pre-create user
+        queries::create_user(&pool, "Player1", discord_id, None)
+            .await
+            .unwrap();
+
+        // Try to complete verification for same discord_id
+        let result = complete_verification(&pool, discord_id, "Player2").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ishaq_ayubi_verification_pull() {
+        let pool = setup_test_db().await;
+
+        // Pull API key from .env (KRUNKER_API)
+        dotenvy::dotenv().ok();
+        let api_key = std::env::var("KRUNKER_API").unwrap_or_else(|_| "DUMMY_KEY".to_string());
+        let krunker_api = KrunkerClient::new(api_key).unwrap();
+
+        let discord_id = "test_discord_user";
+        let krunker_username = "IshaqAyubi";
+        let code = "VERIFYB2C1A3";
+
+        // Create the verification record manually for this test
+        // Using pepsis account and just a random string for the verification
+        let now = Utc::now().timestamp();
+        queries::create_verification(&pool, discord_id, krunker_username, code, now + 600)
+            .await
+            .unwrap();
+
+        println!(
+            "Pulling social posts for: {} with code: {}...",
+            krunker_username, code
+        );
+
+        // Pull posts and check verification
+        match check_verification(&pool, &krunker_api, discord_id).await {
+            Ok(result) => match result {
+                VerificationResult::Success { krunker_username } => {
+                    println!("Success! Found verification for {}", krunker_username);
+                }
+                VerificationResult::NotFound { code, .. } => {
+                    println!(
+                        "Verification code {} not found in posts for {}",
+                        code, krunker_username
+                    );
+                }
+                _ => println!("Unexpected result: {:?}", result),
+            },
+            Err(e) => {
+                if e.to_string().contains("403") || e.to_string().contains("Not allowed") {
+                    println!(
+                        "Observation: API call failed with 403 (Invalid/Unauthorized API Key). This is expected if the key in .env is invalid."
+                    );
+                } else {
+                    println!("Observation: Verification check failed with error: {}", e);
+                }
+            }
+        }
+    }
 }

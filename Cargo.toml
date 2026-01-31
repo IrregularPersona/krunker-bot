@@ -10,6 +10,9 @@ serenity = "0.12.5"
 tokio = { version = "1.49.0", features = [ "full" ] }
 async-trait = "0.1.89"
 
+# database
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
+
 # my own krunker api wrapper
 krunker-rs = { git = "https://github.com/IrregularPersona/krunker-rs" }
 
@@ -17,12 +20,14 @@ krunker-rs = { git = "https://github.com/IrregularPersona/krunker-rs" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 
-# time helper
+# helper
 chrono = "0.4.43"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
 rand = "0.9.2"
+dotenvy = "0.15.7"
 
-# database
+
+
+
 
 
 

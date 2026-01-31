@@ -1,28 +1,60 @@
 use async_trait::async_trait;
 use chrono::TimeDelta;
-use serenity::all::{CreateEmbed, CreateMessage, ErrorResponse};
-use serenity::model::channel::Message;
-use serenity::prelude::*;
-
 use krunker_rs::Client as KrunkerClient;
 use krunker_rs::MatchParticipant;
+use serenity::all::{CreateEmbed, CreateMessage};
+use serenity::model::channel::Message;
+use serenity::prelude::*;
+use sqlx::SqlitePool;
 use std::sync::Arc;
 
+pub struct CommandMetadata {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub usage: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
 #[async_trait]
-pub trait KrunkerCommand {
+pub trait KrunkerCommand: Send + Sync {
+    fn metadata(&self) -> CommandMetadata;
+
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    );
+        pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+pub fn all_commands() -> Vec<Arc<dyn KrunkerCommand>> {
+    vec![
+        Arc::new(Ping),
+        Arc::new(Stats),
+        Arc::new(RankedStats),
+        Arc::new(RankedList),
+        Arc::new(SpecificMatch),
+        Arc::new(Help),
+        Arc::new(Link),
+        Arc::new(Verify),
+    ]
 }
 
 pub struct Ping;
 
 #[async_trait]
 impl KrunkerCommand for Ping {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "ping",
+            description: "Check if the bot is responsive",
+            usage: "&ping",
+            aliases: &[],
+        }
+    }
+
     #[allow(unused_variables)]
     async fn execute(
         &self,
@@ -30,10 +62,10 @@ impl KrunkerCommand for Ping {
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
-        if let Err(why) = msg.channel_id.say(&ctx.http, "ping back").await {
-            tracing::error!("Error sending message: {why:?}");
-        }
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        msg.channel_id.say(&ctx.http, "ping back").await?;
+        Ok(())
     }
 }
 
@@ -41,6 +73,15 @@ pub struct Stats;
 
 #[async_trait]
 impl KrunkerCommand for Stats {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "stats",
+            description: "Show general player statistics (K/D, Level, KR)",
+            usage: "&stats <username>",
+            aliases: &["p"],
+        }
+    }
+
     #[allow(unused_variables)]
     async fn execute(
         &self,
@@ -48,18 +89,15 @@ impl KrunkerCommand for Stats {
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let username = args.get(0).unwrap_or(&"");
 
         if username.is_empty() {
-            if let Err(why) = msg
-                .channel_id
+            msg.channel_id
                 .say(&ctx.http, "Usage: &stats <username>")
-                .await
-            {
-                tracing::error!("Error sending message: {why:?}");
-            }
-            return;
+                .await?;
+            return Ok(());
         }
 
         match krunker_api.get_player(username).await {
@@ -85,22 +123,17 @@ impl KrunkerCommand for Stats {
                     .field("Games Played", player.player_games.to_string(), true)
                     .color(0x00ff00);
 
-                if let Err(why) = msg
-                    .channel_id
+                msg.channel_id
                     .send_message(&ctx.http, CreateMessage::new().embed(embed))
-                    .await
-                {
-                    tracing::error!("Error sending message: {why:?}");
-                }
+                    .await?;
             }
 
             Err(e) => {
                 let response = format!("Error fetching stats: {}", e);
-                if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
-                    tracing::error!("Error sending message: {why:?}");
-                }
+                msg.channel_id.say(&ctx.http, response).await?;
             }
         }
+        Ok(())
     }
 }
 
@@ -108,44 +141,46 @@ pub struct RankedStats;
 
 #[async_trait]
 impl KrunkerCommand for RankedStats {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "rankedstats",
+            description: "Show detailed stats for the last N ranked matches",
+            usage: "&rankedstats <username> [count]",
+            aliases: &["r"],
+        }
+    }
+
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let username = args.get(0).unwrap_or(&"");
         let count_str = args.get(1).unwrap_or(&"");
 
         if username.is_empty() {
-            if let Err(why) = msg
-                .channel_id
-                .say(&ctx.http, "Usage: &rankedstats <username>")
-                .await
-            {
-                eprintln!("Error sending message: {why:?}");
-            }
-            return;
+            msg.channel_id
+                .say(&ctx.http, "Usage: &rankedstats <username> [count]")
+                .await?;
+            return Ok(());
         }
 
         let mut count: i32 = 1;
         if !count_str.is_empty() {
-            count = count_str.parse::<i32>().expect("Failure to parse");
+            count = count_str.parse::<i32>().unwrap_or(1);
         }
 
         match krunker_api.get_player_matches(username, None, None).await {
             Ok(data) => {
                 let matches = data.pmr_matches.unwrap_or_default();
                 if matches.is_empty() {
-                    if let Err(_) = msg
-                        .channel_id
+                    msg.channel_id
                         .say(&ctx.http, "No recent ranked data found!")
-                        .await
-                    {
-                        tracing::info!("Ranked data for {} is empty.", username);
-                    }
-                    return;
+                        .await?;
+                    return Ok(());
                 }
 
                 let mut embed = CreateEmbed::new()
@@ -167,9 +202,9 @@ impl KrunkerCommand for RankedStats {
 
                     let match_info = format!(
                         "{}\n\
-                     K/D: {}/{} ({:.2})\n\
-                     Score: {} | Assists: {}\n\
-                     Accuracy: {}%",
+                      K/D: {}/{} ({:.2})\n\
+                      Score: {} | Assists: {}\n\
+                      Accuracy: {}%",
                         result,
                         pmatch.pm_kills,
                         pmatch.pm_deaths,
@@ -186,21 +221,16 @@ impl KrunkerCommand for RankedStats {
                     );
                 }
 
-                if let Err(why) = msg
-                    .channel_id
+                msg.channel_id
                     .send_message(&ctx.http, CreateMessage::new().embed(embed))
-                    .await
-                {
-                    eprintln!("Error sending message: {why:?}");
-                }
+                    .await?;
             }
             Err(e) => {
                 let response = format!("Error fetching stats: {}", e);
-                if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
-                    eprintln!("Error sending message: {why:?}");
-                }
+                msg.channel_id.say(&ctx.http, response).await?;
             }
         }
+        Ok(())
     }
 }
 
@@ -208,45 +238,45 @@ pub struct RankedList;
 
 #[async_trait]
 impl KrunkerCommand for RankedList {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "rankedlist",
+            description: "List match IDs for the last N ranked matches",
+            usage: "&rl <username> [count]",
+            aliases: &["rl"],
+        }
+    }
+
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let username = args.get(0).unwrap_or(&"");
         if username.is_empty() {
-            if let Err(why) = msg
-                .channel_id
-                .say(&ctx.http, "Usage: &rl <username> <optional: int>")
-                .await
-            {
-                eprintln!("Error sending message: {why:?}");
-            }
-            return;
+            msg.channel_id
+                .say(&ctx.http, "Usage: &rl <username> [count]")
+                .await?;
+            return Ok(());
         }
 
         let count_str = args.get(1).unwrap_or(&"");
         let mut count: i32 = 1;
         if !count_str.is_empty() {
-            count = count_str.parse::<i32>().expect("Failure to parse");
+            count = count_str.parse::<i32>().unwrap_or(1);
         }
 
-        let pdata = krunker_api.get_player_matches(username, None, None).await;
-
-        match pdata {
+        match krunker_api.get_player_matches(username, None, None).await {
             Ok(data) => {
                 let matches = data.pmr_matches.unwrap_or_default();
                 if matches.is_empty() {
-                    if let Err(_) = msg
-                        .channel_id
+                    msg.channel_id
                         .say(&ctx.http, "No recent ranked data found!")
-                        .await
-                    {
-                        tracing::info!("Ranked data for {} is empty.", username);
-                    }
-                    return;
+                        .await?;
+                    return Ok(());
                 }
 
                 let mut embed = CreateEmbed::new()
@@ -261,21 +291,16 @@ impl KrunkerCommand for RankedList {
                     );
                 }
 
-                if let Err(e) = msg
-                    .channel_id
+                msg.channel_id
                     .send_message(&ctx.http, CreateMessage::new().embed(embed))
-                    .await
-                {
-                    tracing::error!("Error sending message: {e:?}");
-                }
+                    .await?;
             }
             Err(e) => {
                 let response = format!("Error fetching stats: {}", e);
-                if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
-                    tracing::error!("Error sending message: {why:?}");
-                }
+                msg.channel_id.say(&ctx.http, response).await?;
             }
         }
+        Ok(())
     }
 }
 
@@ -283,38 +308,38 @@ pub struct SpecificMatch;
 
 #[async_trait]
 impl KrunkerCommand for SpecificMatch {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "specificmatch",
+            description: "Get detailed statistics for a specific match ID",
+            usage: "&sm <match_id>",
+            aliases: &["sm"],
+        }
+    }
+
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let id_str = args.get(0).unwrap_or(&"");
-        let match_id = id_str.parse::<i64>().expect("Failure to parse");
+        let match_id = id_str.parse::<i64>().unwrap_or(0);
 
         if match_id <= 0 {
-            if let Err(_) = msg
-                .channel_id
-                .say(&ctx.http, "Usage: &sm <int: match_id>")
-                .await
-            {
-                tracing::info!("Invalid ID");
-            }
-            return;
+            msg.channel_id.say(&ctx.http, "Usage: &sm <match_id>").await?;
+            return Ok(());
         }
 
-        let pdata = krunker_api.get_match(match_id).await;
-
-        match pdata {
+        match krunker_api.get_match(match_id).await {
             Ok(data) => {
                 let participants = match data.match_participants {
                     Some(ref p) if !p.is_empty() => p,
                     _ => {
-                        if let Err(_) = msg.channel_id.say(&ctx.http, "Report to Glen????").await {
-                            tracing::error!("No participants??");
-                        }
-                        return;
+                        msg.channel_id.say(&ctx.http, "No participants found for this match.").await?;
+                        return Ok(());
                     }
                 };
 
@@ -332,7 +357,6 @@ impl KrunkerCommand for SpecificMatch {
                 let mut team_1: Vec<&MatchParticipant> = Vec::new();
                 let mut team_2: Vec<&MatchParticipant> = Vec::new();
 
-                // some hacky shit. could prolly write it with some weird rust oneliner lmfao
                 for participant in participants {
                     if participant.mp_team == 1 {
                         team_1.push(participant);
@@ -365,11 +389,7 @@ impl KrunkerCommand for SpecificMatch {
                     embed = embed.field(
                         format!(
                             "Team 1 {}",
-                            if team_1[0].mp_victory == 1 {
-                                "🏆"
-                            } else {
-                                ""
-                            }
+                            if team_1[0].mp_victory == 1 { "🏆" } else { "" }
                         ),
                         team_1_stats,
                         false,
@@ -386,33 +406,24 @@ impl KrunkerCommand for SpecificMatch {
                     embed = embed.field(
                         format!(
                             "Team 2 {}",
-                            if team_2[0].mp_victory == 1 {
-                                "🏆"
-                            } else {
-                                ""
-                            }
+                            if team_2[0].mp_victory == 1 { "🏆" } else { "" }
                         ),
                         team_2_stats,
                         false,
                     );
                 }
 
-                if let Err(why) = msg
-                    .channel_id
+                msg.channel_id
                     .send_message(&ctx.http, CreateMessage::new().embed(embed))
-                    .await
-                {
-                    tracing::error!("Error sending message: {why:?}");
-                }
+                    .await?;
             }
 
             Err(e) => {
                 let resp = format!("Error fetching stats: {}", e);
-                if let Err(why) = msg.channel_id.say(&ctx.http, resp).await {
-                    tracing::error!("Error sending message: {why:?}");
-                }
+                msg.channel_id.say(&ctx.http, resp).await?;
             }
         }
+        Ok(())
     }
 }
 
@@ -420,6 +431,15 @@ pub struct Help;
 
 #[async_trait]
 impl KrunkerCommand for Help {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "help",
+            description: "Show this help message",
+            usage: "&help",
+            aliases: &["h"],
+        }
+    }
+
     #[allow(unused_variables)]
     async fn execute(
         &self,
@@ -427,40 +447,79 @@ impl KrunkerCommand for Help {
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-    ) {
-        let embed = CreateEmbed::new()
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut embed = CreateEmbed::new()
             .title("Krunker Bot Help")
             .description("Available commands (Prefix: `&`)")
-            .field(
-                "`&p <username>`",
-                "Show general player statistics (K/D, Level, KR).",
-                false,
-            )
-            .field(
-                "`&r <user> [count]`",
-                "Show detailed stats for the last N ranked matches.",
-                false,
-            )
-            .field(
-                "`&rl <user> [count]`",
-                "List match IDs for the last N ranked matches.",
-                false,
-            )
-            .field(
-                "`&sm <match_id>`",
-                "Get detailed statistics for a specific match ID.",
-                false,
-            )
-            .field("`&ping`", "Check if the bot is responsive.", false)
-            .color(0x3498db) // random blue
+            .color(0x3498db)
             .footer(serenity::all::CreateEmbedFooter::new("Krunker RS Bot"));
 
-        if let Err(why) = msg
-            .channel_id
-            .send_message(&ctx.http, CreateMessage::new().embed(embed))
-            .await
-        {
-            tracing::error!("Error sending help message: {why:?}");
+        for cmd in all_commands() {
+            let meta = cmd.metadata();
+            embed = embed.field(
+                format!("`{}`", meta.usage),
+                meta.description,
+                false,
+            );
         }
+
+        msg.channel_id
+            .send_message(&ctx.http, CreateMessage::new().embed(embed))
+            .await?;
+            
+        Ok(())
+    }
+}
+
+pub struct Link;
+
+#[async_trait]
+impl KrunkerCommand for Link {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "link",
+            description: "Link your Krunker account to your Discord account",
+            usage: "&link <username>",
+            aliases: &[],
+        }
+    }
+
+    async fn execute(
+        &self,
+        ctx: &Context,
+        msg: &Message,
+        krunker_api: &Arc<KrunkerClient>,
+        args: Vec<&str>,
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        msg.channel_id.say(&ctx.http, "Account linking is not yet implemented.").await?;
+        Ok(())
+    }
+}
+
+pub struct Verify;
+
+#[async_trait]
+impl KrunkerCommand for Verify {
+    fn metadata(&self) -> CommandMetadata {
+        CommandMetadata {
+            name: "verify",
+            description: "Verify your linked Krunker account",
+            usage: "&verify",
+            aliases: &[],
+        }
+    }
+
+    async fn execute(
+        &self,
+        ctx: &Context,
+        msg: &Message,
+        krunker_api: &Arc<KrunkerClient>,
+        args: Vec<&str>,
+        _pool: &SqlitePool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        msg.channel_id.say(&ctx.http, "Verification is not yet implemented.").await?;
+        Ok(())
     }
 }

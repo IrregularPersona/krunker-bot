@@ -6,13 +6,12 @@ use std::sync::Arc;
 use krunker_rs::Client as KrunkerClient;
 
 // serenity
-use serenity::all::{CreateEmbed, CreateMessage};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
 
 // internal
-use crate::commands::{self, KrunkerCommand};
+use super::commands::{self, KrunkerCommand};
 
 #[allow(dead_code)]
 pub struct Handler {

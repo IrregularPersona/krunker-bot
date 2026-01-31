@@ -1,11 +1,11 @@
+mod bot;
+use crate::bot::handler::Handler;
+
+mod card;
+
 use krunker_rs::Client as KrunkerClient;
 use serenity::prelude::*;
 use std::sync::Arc;
-
-mod handler;
-use handler::Handler;
-
-mod commands;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

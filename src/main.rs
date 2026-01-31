@@ -1,11 +1,16 @@
+// external modules
 use krunker_rs::Client as KrunkerClient;
 use serenity::prelude::*;
+
+// std modules
 use std::sync::Arc;
 
-mod handler;
-use handler::Handler;
+// bot submodule
+mod bot;
+use crate::bot::handler::Handler;
 
-mod commands;
+// database submodule
+mod database;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,6 +18,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
+
+    // initialize database
+    let pool = database::init_db().await?;
+    // println!("Database initialized!");
 
     // env vars
     tracing::info!("Grabbing tokens...");

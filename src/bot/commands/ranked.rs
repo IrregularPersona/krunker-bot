@@ -16,12 +16,11 @@ pub enum RankedMode {
 pub async fn ranked(
     ctx: Context<'_>,
     #[description = "The Krunker username to look up (optional if linked)"] username: Option<String>,
-    #[description = "Number of matches to show"] count: Option<usize>,
     #[description = "Show detailed stats or just a list of IDs"] mode: Option<RankedMode>,
 ) -> Result<(), Error> {
     let krunker_api = &ctx.data().krunker_api;
     let pool = &ctx.data().pool;
-    let count = count.unwrap_or(1);
+    let count = 10;
     let mode = mode.unwrap_or(RankedMode::Stats);
 
     let target_username = if let Some(u) = username {
@@ -60,27 +59,24 @@ pub async fn ranked(
                         };
 
                         let result = if pmatch.pm_victory == 1 {
-                            "✅ Victory"
+                            "✅ Win"
                         } else {
-                            "❌ Defeat"
+                            "❌ Loss"
                         };
 
+                        // These are kept as unused for now as per user request
+                        let _score = pmatch.pm_score;
+                        let _assists = pmatch.pm_assists;
+                        let _accuracy = pmatch.pm_accuracy;
+
                         let match_info = format!(
-                            "{}\n\
-                          K/D: {}/{} ({:.2})\n\
-                          Score: {} | Assists: {}\n\
-                          Accuracy: {}%",
+                            "Result: **{}**\nKDR: **{:.2}**",
                             result,
-                            pmatch.pm_kills,
-                            pmatch.pm_deaths,
                             kdr,
-                            pmatch.pm_score,
-                            pmatch.pm_assists,
-                            pmatch.pm_accuracy,
                         );
 
                         embed = embed.field(
-                            format!("Match #{} - {}", pmatch.pm_match_id, pmatch.pm_date),
+                            format!("Match ID: #{}", pmatch.pm_match_id),
                             match_info,
                             false,
                         );

@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 pub mod ping;
 pub mod stats;
-pub mod ranked_stats;
-pub mod ranked_list;
+pub mod ranked;
 pub mod specific_match;
 pub mod help;
 pub mod link;
@@ -25,8 +24,7 @@ pub fn all_commands() -> Vec<poise::Command<Data, Error>> {
     vec![
         ping::ping(),
         stats::stats(),
-        ranked_stats::ranked_stats(),
-        ranked_list::ranked_list(),
+        ranked::ranked(),
         specific_match::specific_match(),
         help::help(),
         link::link(),

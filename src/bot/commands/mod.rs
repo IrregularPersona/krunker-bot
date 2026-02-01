@@ -13,6 +13,7 @@ pub mod specific_match;
 pub mod help;
 pub mod link;
 pub mod verify;
+pub mod unlink;
 
 pub struct CommandMetadata {
     pub name: &'static str,
@@ -45,5 +46,6 @@ pub fn all_commands() -> Vec<Arc<dyn KrunkerCommand>> {
         Arc::new(help::Help),
         Arc::new(link::Link),
         Arc::new(verify::Verify),
+        Arc::new(unlink::Unlink),
     ]
 }

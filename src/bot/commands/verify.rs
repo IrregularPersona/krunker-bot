@@ -20,16 +20,59 @@ impl KrunkerCommand for Verify {
         }
     }
 
-    #[allow(unused_variables)]
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
         krunker_api: &Arc<KrunkerClient>,
-        args: Vec<&str>,
-        _pool: &SqlitePool,
+        _args: Vec<&str>,
+        pool: &SqlitePool,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        msg.channel_id.say(&ctx.http, "Verification is not yet implemented.").await?;
+        use crate::verification::flow::{check_verification, complete_verification, VerificationResult};
+
+        let discord_id = msg.author.id.to_string();
+
+        match check_verification(pool, krunker_api, &discord_id).await {
+            Ok(VerificationResult::Success { krunker_username }) => {
+                complete_verification(pool, &discord_id, &krunker_username).await?;
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        format!(
+                            "✅ Successfully verified! Your Discord account is now linked to **{}**.",
+                            krunker_username
+                        ),
+                    )
+                    .await?;
+            }
+            Ok(VerificationResult::NotFound {
+                code,
+                krunker_username,
+                attempts,
+            }) => {
+                let response = format!(
+                    "❌ Verification code not found for **{}**.\n\n\
+                    Make sure you've posted this exactly: `{}`\n\
+                    Attempts: {}/5",
+                    krunker_username, code, attempts
+                );
+                msg.channel_id.say(&ctx.http, response).await?;
+            }
+            Ok(VerificationResult::NoVerification) => {
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        "You don't have an active verification session. Use `&link <username>` first.",
+                    )
+                    .await?;
+            }
+            Err(e) => {
+                msg.channel_id
+                    .say(&ctx.http, format!("Error: {}", e))
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 }

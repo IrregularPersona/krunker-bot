@@ -20,16 +20,44 @@ impl KrunkerCommand for Link {
         }
     }
 
-    #[allow(unused_variables)]
     async fn execute(
         &self,
         ctx: &Context,
         msg: &Message,
-        krunker_api: &Arc<KrunkerClient>,
+        _krunker_api: &Arc<KrunkerClient>,
         args: Vec<&str>,
-        _pool: &SqlitePool,
+        pool: &SqlitePool,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        msg.channel_id.say(&ctx.http, "Account linking is not yet implemented.").await?;
+        let username = match args.get(0) {
+            Some(u) if !u.is_empty() => u,
+            _ => {
+                msg.channel_id
+                    .say(&ctx.http, "Usage: &link <krunker_username>")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        let discord_id = msg.author.id.to_string();
+
+        match crate::verification::flow::start_verification(pool, &discord_id, username).await {
+            Ok(code) => {
+                let response = format!(
+                    "Verification started for **{}**!\n\n\
+                    Please post the following code to your Krunker.io social profile:\n\
+                    `{}`\n\n\
+                    After posting, run `&verify` to complete the link.",
+                    username, code
+                );
+                msg.channel_id.say(&ctx.http, response).await?;
+            }
+            Err(e) => {
+                msg.channel_id
+                    .say(&ctx.http, format!("Error: {}", e))
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 }

@@ -16,7 +16,7 @@ pub async fn start_verification(
     pool: &SqlitePool,
     discord_id: &str,
     krunker_username: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if queries::user_exists(pool, discord_id).await? {
         return Err("You have already linked to a Krunker account. Use /unlink first.".into());
     }
@@ -39,7 +39,7 @@ pub async fn check_verification(
     pool: &SqlitePool,
     krunker_api: &KrunkerClient,
     discord_id: &str,
-) -> Result<VerificationResult, Box<dyn std::error::Error>> {
+) -> Result<VerificationResult, Box<dyn std::error::Error + Send + Sync>> {
     let expr = Utc::now().timestamp();
     let verification = sqlx::query_as::<_, crate::database::models::Verification>(
         "SELECT id, discord_id, krunker_username, code, created_at, expires_at, attempts
@@ -96,7 +96,7 @@ pub async fn check_verification(
     Ok(VerificationResult::NotFound {
         code: verification.code,
         krunker_username: verification.krunker_username,
-        attempts: verification.attempts,
+        attempts: new_attempts,
     })
 }
 
@@ -105,7 +105,7 @@ pub async fn complete_verification(
     pool: &SqlitePool,
     discord_id: &str,
     krunker_username: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let existing = queries::get_user_by_username(pool, krunker_username).await?;
     if let Some(res) = existing {
         if res.discord_id != discord_id {

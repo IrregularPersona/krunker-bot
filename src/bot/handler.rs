@@ -6,36 +6,38 @@ use std::sync::Arc;
 use krunker_rs::Client as KrunkerClient;
 
 // serenity
-use serenity::all::{CreateEmbed, CreateMessage};
+// use serenity::all::{CreateEmbed, CreateMessage};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
+use sqlx::SqlitePool;
 
 // internal
-use crate::commands::{self, KrunkerCommand};
+use super::commands;
 
 #[allow(dead_code)]
 pub struct Handler {
     pub krunker_api: Arc<KrunkerClient>,
-    pub commands: HashMap<String, Box<dyn commands::KrunkerCommand + Send + Sync>>,
+    pub pool: SqlitePool,
+    pub commands: HashMap<String, Arc<dyn commands::KrunkerCommand>>,
 }
 
 impl Handler {
-    pub fn new(krunker_api: Arc<KrunkerClient>) -> Self {
-        let mut commands: HashMap<String, Box<dyn KrunkerCommand + Send + Sync>> = HashMap::new();
+    pub fn new(krunker_api: Arc<KrunkerClient>, pool: SqlitePool) -> Self {
+        let mut commands_map = HashMap::new();
 
-        commands.insert("ping".to_string(), Box::new(commands::Ping));
-        commands.insert("p".to_string(), Box::new(commands::Stats));
-        commands.insert("r".to_string(), Box::new(commands::RankedStats));
-        commands.insert("rl".to_string(), Box::new(commands::RankedList));
-        commands.insert("sm".to_string(), Box::new(commands::SpecificMatch));
-
-        commands.insert("help".to_string(), Box::new(commands::Help));
-        commands.insert("h".to_string(), Box::new(commands::Help));
+        for cmd in commands::all_commands() {
+            let meta = cmd.metadata();
+            commands_map.insert(meta.name.to_string(), Arc::clone(&cmd));
+            for alias in meta.aliases {
+                commands_map.insert(alias.to_string(), Arc::clone(&cmd));
+            }
+        }
 
         Self {
             krunker_api,
-            commands,
+            pool,
+            commands: commands_map,
         }
     }
 }
@@ -64,7 +66,10 @@ impl EventHandler for Handler {
         let args: Vec<&str> = parts.collect();
 
         if let Some(cmd) = self.commands.get(command) {
-            cmd.execute(&ctx, &msg, &self.krunker_api, args).await;
+            if let Err(why) = cmd.execute(&ctx, &msg, &self.krunker_api, args, &self.pool).await {
+                tracing::error!("Error executing command {}: {:?}", command, why);
+                let _ = msg.channel_id.say(&ctx.http, format!("Error: {}", why)).await;
+            }
         } else {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Not a valid command!").await {
                 tracing::error!("Error sending message: {why:?}");

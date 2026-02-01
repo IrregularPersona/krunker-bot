@@ -4,10 +4,30 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+# diiscord
 serenity = "0.12.5"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.49.0", features = [ "full" ] }
+async-trait = "0.1.89"
+
+# database
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
+
+# my own krunker api wrapper
 krunker-rs = { git = "https://github.com/IrregularPersona/krunker-rs" }
+
+# logging
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
-async-trait = "0.1.89"
+
+# helper
 chrono = "0.4.43"
+rand = "0.9.2"
+dotenvy = "0.15.7"
+
+
+
+
+
+
+

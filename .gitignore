@@ -1,3 +1,15 @@
 /target
 *.pdf
 *.typ
+
+
+# SQLite temp/log files and DB file
+*.db
+*.db‑shm
+*.db‑wal
+*.db‑tmp
+
+.env
+bot.db-shm
+bot.db-wal
+bot.db*

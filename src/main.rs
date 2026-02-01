@@ -1,22 +1,37 @@
+// external modules
 use krunker_rs::Client as KrunkerClient;
 use serenity::prelude::*;
+
+// std modules
 use std::sync::Arc;
 
-mod handler;
-use handler::Handler;
+// bot submodule
+mod bot;
+use crate::bot::handler::Handler;
 
-mod commands;
+// database submodule
+mod database;
+
+// verification submodule
+mod verification;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv().ok();
+
     // initialize logging
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    // initialize database
+    // for now this does absolute nothing lmfao
+    let pool = database::init_db().await?;
+    // println!("Database initialized!");
+
     // env vars
     tracing::info!("Grabbing tokens...");
-    let krunker_key = std::env::var("KRUNKER_KEY")?;
+    let krunker_key = std::env::var("KRUNKER_API")?;
     let discord_token = std::env::var("DISCORD_TOKEN")?;
 
     // debug flags for this later pls lol
@@ -30,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Building client...");
     let mut client = Client::builder(&discord_token, intents)
-        .event_handler(Handler::new(krunker_api))
+        .event_handler(Handler::new(krunker_api, pool))
         .await
         .expect("Failure to create client");
 

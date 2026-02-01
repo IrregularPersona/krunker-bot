@@ -1,52 +1,31 @@
-use async_trait::async_trait;
-use krunker_rs::Client as KrunkerClient;
-use serenity::model::channel::Message;
-use serenity::prelude::*;
-use sqlx::SqlitePool;
-use std::sync::Arc;
-
-use super::{CommandMetadata, KrunkerCommand};
+use crate::bot::commands::{Context, Error};
 use crate::database::queries;
+use poise::CreateReply;
 
-pub struct Unlink;
+/// Unlink your Krunker account from your Discord account
+#[poise::command(slash_command, prefix_command, ephemeral = true)]
+pub async fn unlink(ctx: Context<'_>) -> Result<(), Error> {
+    let pool = &ctx.data().pool;
+    let discord_id = ctx.author().id.to_string();
 
-#[async_trait]
-impl KrunkerCommand for Unlink {
-    fn metadata(&self) -> CommandMetadata {
-        CommandMetadata {
-            name: "unlink",
-            description: "Unlink your Krunker account from your Discord account",
-            usage: "&unlink",
-            aliases: &[],
-        }
+    if !queries::user_exists(pool, &discord_id).await? {
+        ctx.send(
+            CreateReply::default()
+                .content("You are not linked to any Krunker account.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
     }
 
-    async fn execute(
-        &self,
-        ctx: &Context,
-        msg: &Message,
-        _krunker_api: &Arc<KrunkerClient>,
-        _args: Vec<&str>,
-        pool: &SqlitePool,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let discord_id = msg.author.id.to_string();
+    queries::delete_user(pool, &discord_id).await?;
 
-        if !queries::user_exists(pool, &discord_id).await? {
-            msg.channel_id
-                .say(&ctx.http, "You are not linked to any Krunker account.")
-                .await?;
-            return Ok(());
-        }
+    ctx.send(
+        CreateReply::default()
+            .content("✅ Successfully unlinked your account. You can now link a new one with `/link <username>`.")
+            .ephemeral(true),
+    )
+    .await?;
 
-        queries::delete_user(pool, &discord_id).await?;
-
-        msg.channel_id
-            .say(
-                &ctx.http,
-                "✅ Successfully unlinked your account. You can now link a new one with `&link <username>`.",
-            )
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }

@@ -1,3 +1,10 @@
 /target
 *.pdf
 *.typ
+
+.env
+
+# ignore SQLite DB files
+bot.db
+bot.db-shm
+bot.db-wal

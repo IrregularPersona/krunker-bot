@@ -76,6 +76,23 @@ pub async fn check_verification(
         });
     }
 
+    sqlx::query!(
+        "UPDATE verifications SET attempts = attempts + 1 WHERE discord_id = ?",
+        discord_id
+    )
+    .execute(pool)
+    .await?;
+
+    let new_attempts = verification.attempts + 1;
+
+    if new_attempts >= 5 {
+        sqlx::query!("DELETE FROM verifications WHERE discord_id = ?", discord_id)
+            .execute(pool)
+            .await?;
+
+        return Err("Too many verification attempts (5). Please start over with /link.".into());
+    }
+
     Ok(VerificationResult::NotFound {
         code: verification.code,
         krunker_username: verification.krunker_username,
@@ -89,7 +106,15 @@ pub async fn complete_verification(
     discord_id: &str,
     krunker_username: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Fetch country from Krunker API
+    let existing = queries::get_user_by_username(pool, krunker_username).await?;
+    if let Some(res) = existing {
+        if res.discord_id != discord_id {
+            return Err(
+                "This Krunker username is already linked to another Discord account.".into(),
+            );
+        }
+    }
+
     let country = None;
 
     // Create user in database
@@ -185,7 +210,7 @@ mod tests {
         let code = "VERIFYB2C1A3";
 
         // Create the verification record manually for this test
-        // Using pepsis account and just a random string for the verification
+        // Using Pepsi's account and just a random string for the verification
         let now = Utc::now().timestamp();
         queries::create_verification(&pool, discord_id, krunker_username, code, now + 600)
             .await

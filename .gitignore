@@ -12,4 +12,4 @@
 .env
 bot.db-shm
 bot.db-wal
-bot.db*
+bot.db

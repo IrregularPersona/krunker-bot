@@ -1,77 +1,59 @@
-use async_trait::async_trait;
-use krunker_rs::Client as KrunkerClient;
-use serenity::all::{CreateEmbed, CreateMessage};
-use serenity::model::channel::Message;
-use serenity::prelude::*;
-use sqlx::SqlitePool;
-use std::sync::Arc;
+use crate::bot::commands::{Context, Error};
+use crate::database::queries;
+use serenity::all::CreateEmbed;
+use poise::CreateReply;
 
-use super::{CommandMetadata, KrunkerCommand};
+/// Show general player statistics (K/D, Level, KR)
+#[poise::command(slash_command, prefix_command)]
+pub async fn stats(
+    ctx: Context<'_>,
+    #[description = "The Krunker username to look up (optional if linked)"] username: Option<String>,
+) -> Result<(), Error> {
+    let krunker_api = &ctx.data().krunker_api;
+    let pool = &ctx.data().pool;
 
-pub struct Stats;
-
-#[async_trait]
-impl KrunkerCommand for Stats {
-    fn metadata(&self) -> CommandMetadata {
-        CommandMetadata {
-            name: "stats",
-            description: "Show general player statistics (K/D, Level, KR)",
-            usage: "&stats <username>",
-            aliases: &["p"],
-        }
-    }
-
-    #[allow(unused_variables)]
-    async fn execute(
-        &self,
-        ctx: &Context,
-        msg: &Message,
-        krunker_api: &Arc<KrunkerClient>,
-        args: Vec<&str>,
-        _pool: &SqlitePool,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let username = args.get(0).unwrap_or(&"");
-
-        if username.is_empty() {
-            msg.channel_id
-                .say(&ctx.http, "Usage: &stats <username>")
+    let target_username = if let Some(u) = username {
+        u
+    } else {
+        let discord_id = ctx.author().id.to_string();
+        if let Some(user) = queries::get_user_by_discord_id(pool, &discord_id).await? {
+            user.username
+        } else {
+            ctx.say("Please provide a username or link your account first with `/link`.")
                 .await?;
             return Ok(());
         }
+    };
 
-        match krunker_api.get_player(username).await {
-            Ok(player) => {
-                let embed = CreateEmbed::new()
-                    .title(format!(
-                        "{}{}",
-                        player.player_name,
-                        if player.player_verified { " ✅" } else { "" }
-                    ))
-                    .field(
-                        "Clan",
-                        if player.player_clan.is_empty() {
-                            "None"
-                        } else {
-                            &player.player_clan
-                        },
-                        true,
-                    )
-                    .field("Level", player.player_level.to_string(), true)
-                    .field("KR", player.player_kr.to_string(), true)
-                    .field("K/D Ratio", format!("{:.2}", player.player_kdr), true)
-                    .field("Games Played", player.player_games.to_string(), true)
-                    .color(0x00ff00);
+    match krunker_api.get_player(&target_username).await {
+        Ok(player) => {
+            let embed = CreateEmbed::new()
+                .title(format!(
+                    "{}{}",
+                    player.player_name,
+                    if player.player_verified { " ✅" } else { "" }
+                ))
+                .field(
+                    "Clan",
+                    if player.player_clan.is_empty() {
+                        "None"
+                    } else {
+                        &player.player_clan
+                    },
+                    true,
+                )
+                .field("Level", player.player_level.to_string(), true)
+                .field("KR", player.player_kr.to_string(), true)
+                .field("K/D Ratio", format!("{:.2}", player.player_kdr), true)
+                .field("Games Played", player.player_games.to_string(), true)
+                .color(0x00ff00);
 
-                msg.channel_id
-                    .send_message(&ctx.http, CreateMessage::new().embed(embed))
-                    .await?;
-            }
-
-            Err(e) => {
-                let response = format!("Error fetching stats: {}", e);
-                msg.channel_id.say(&ctx.http, response).await?;
-            }
+            ctx.send(CreateReply::default().embed(embed)).await?;
         }
-        Ok(())
+        Err(e) => {
+            ctx.say(format!("Error fetching stats for **{}**: {}", target_username, e))
+                .await?;
+        }
     }
+    Ok(())
 }
